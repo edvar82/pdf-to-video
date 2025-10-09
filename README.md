@@ -1,11 +1,11 @@
 ## PDF to Video (PT-BR)
 
-Script em Python para gerar um vídeo a partir de um PDF de slides, áudios por slide e um `script.docx` contendo marcações como `[slide_01]`, `[short_pause]`, `[long_pause]` e `[vignette]`.
+Script em Python para gerar um vídeo a partir de um PDF de slides, áudios por slide (OBRIGATORIAMENTE em formato `.wav`) e um `script.docx` contendo marcações como `[slide_01]`, `[short_pause]`, `[long_pause]` e `[vignette]`.
 
 ### Como funciona
 
 - Renderiza cada página do PDF em imagem PNG numerada (`slide_01.png`, `slide_02.png`, ...).
-- Descobre os áudios no diretório `audios/` pelos nomes `slide_XX.(wav|mp3|...)` e lê suas durações.
+- Descobre os áudios no diretório `audios/` pelos nomes `slide_XX.wav` (o formato deve ser WAV) e lê suas durações.
 - Lê o `script.docx` e interpreta os tokens:
   - `[slide_01]`, `[slide_02]` ...: define o slide e usa o áudio correspondente se existir.
   - `[short_pause]` e `[long_pause]`: adiciona pausas com a última imagem exibida.
@@ -36,7 +36,7 @@ Estrutura esperada de uma pasta de aula:
   audios/
     slide_01.wav
     slide_02.wav
-    ...
+    ... (todos em `.wav`)
   vignette.mp4 (opcional)
 ```
 
@@ -65,6 +65,14 @@ Durante a execução, o script imprime logs informando:
 - Pausas usam a última imagem do slide exibido como quadro congelado.
 - Se um slide tiver áudio, sua duração define a duração do clipe. Caso contrário, usa-se uma duração mínima (`--short-pause`).
 - O `script.docx` deve conter tokens entre colchetes, por exemplo:
+
+### Formato de Áudio
+
+Os arquivos de áudio DEVEM estar em formato `.wav` (recomendado PCM 16-bit, 44.1 kHz ou 48 kHz). Caso seus áudios estejam em `.mp3` ou outro formato, converta antes de gerar o vídeo. Sugestão de ferramenta online gratuita:
+
+https://online-audio-converter.com/pt/
+
+Nomeie os arquivos exatamente como `slide_01.wav`, `slide_02.wav`, etc. para que o pipeline consiga associá-los aos slides.
 
 ### TTS (opções de voz e idioma)
 
