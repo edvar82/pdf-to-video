@@ -265,7 +265,8 @@ def export_segments(
 	out_paths: List[Path] = []
 	base = src_path.stem
 	for idx, (t1, t2) in enumerate(segments, start=1):
-		out_path = out_dir / f"{base}.{idx}.wav"
+		# Formato: slide_01, slide_02, slide_03, etc.
+		out_path = out_dir / f"slide_{idx:02d}.wav"
 		with AudioFileClip(str(src_path)) as clip:
 			sub = clip.subclip(t1, t2)
 			sub.write_audiofile(
