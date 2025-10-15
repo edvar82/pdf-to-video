@@ -79,9 +79,8 @@ def process_script(text: str) -> str:
     # Dividir o texto em linhas
     lines = text.split('\n')
     
-    processed_lines = []
+    segments = []
     current_segment = []
-    is_first_segment = True
     
     for line in lines:
         line = line.strip()
@@ -89,29 +88,102 @@ def process_script(text: str) -> str:
         if not line:
             continue
         
-        # Verificar se a linha contém tags [slide_XX], [pause] ou [vignette]
-        if re.search(r'\[slide_\d+\]', line) or re.search(r'\[(long_pause|short_pause)\]', line) or re.search(r'\[vignette\]', line):
-            # Se já temos um segmento acumulado, adicionar
+        # Verificar se a linha contém tag de slide (marca início de novo segmento)
+        if re.search(r'\[slide_\d+\]', line):
+            # Salvar segmento anterior se houver conteúdo
             if current_segment:
-                # Não adicionar <#6#> antes do primeiro segmento
-                if not is_first_segment:
-                    processed_lines.append("<#6#>")
-                
-                processed_lines.append(" ".join(current_segment))
+                segments.append(" ".join(current_segment))
                 current_segment = []
-                is_first_segment = False
-            continue
+            
+            # Limpar todas as tags desta linha
+            cleaned_line = re.sub(r'\[slide_\d+\]', '', line)
+            cleaned_line = re.sub(r'\[(long_pause|short_pause)\]', '', cleaned_line)
+            cleaned_line = re.sub(r'\[vignette\]', '', cleaned_line)
+            cleaned_line = cleaned_line.strip()
+            
+            # Se tinha conteúdo além das tags, adiciona ao novo segmento
+            if cleaned_line:
+                current_segment.append(cleaned_line)
         
-        # Adicionar linha ao segmento atual
-        current_segment.append(line)
+        # Verificar se tem tags de pause/vignette sem slide
+        elif re.search(r'\[(long_pause|short_pause|vignette)\]', line):
+            # Remove as tags
+            cleaned_line = re.sub(r'\[(long_pause|short_pause|vignette)\]', '', line)
+            cleaned_line = cleaned_line.strip()
+            
+            # Se tinha conteúdo, adiciona ao segmento atual
+            if cleaned_line:
+                current_segment.append(cleaned_line)
+        
+        else:
+            # Linha normal sem tags
+            current_segment.append(line)
     
     # Adicionar último segmento
     if current_segment:
-        if not is_first_segment:
-            processed_lines.append("<#6#>")
-        processed_lines.append(" ".join(current_segment))
+        segments.append(" ".join(current_segment))
     
-    return "\n".join(processed_lines)
+    # Juntar segmentos com marcador <#6#>
+    return "\n<#6#>\n".join(segments)
+
+
+def split_text_for_tts(text: str, max_chars: int = 4500) -> List[str]:
+    """
+    Divide texto longo em chunks menores respeitando os marcadores <#6#>.
+    
+    Se o texto for menor que max_chars, retorna uma lista com o texto único.
+    Caso contrário, quebra nos marcadores <#6#> sem ultrapassar o limite.
+    
+    IMPORTANTE: Adiciona <#6#> no início de chunks intermediários (exceto o primeiro)
+    para manter a separação quando os áudios forem combinados.
+    
+    Args:
+        text: Texto processado com marcadores <#6#>
+        max_chars: Tamanho máximo de cada chunk (default: 4500 para margem de segurança)
+        
+    Returns:
+        List[str]: Lista de chunks de texto
+    """
+    if len(text) <= max_chars:
+        return [text]
+    
+    # Dividir pelo marcador de silêncio
+    parts = text.split("\n<#6#>\n")
+    
+    chunks = []
+    current_chunk = []
+    current_size = 0
+    
+    for i, part in enumerate(parts):
+        part_size = len(part)
+        # +7 para o marcador \n<#6#>\n que será adicionado entre partes
+        separator_size = 7 if current_chunk else 0
+        
+        # Se adicionar esta parte ultrapassar o limite E já temos algo no chunk
+        if current_size + part_size + separator_size > max_chars and current_chunk:
+            # Salvar chunk atual
+            chunk_text = "\n<#6#>\n".join(current_chunk)
+            chunks.append(chunk_text)
+            
+            # Iniciar novo chunk com esta parte
+            current_chunk = [part] if part else []
+            current_size = part_size
+        else:
+            # Adicionar ao chunk atual
+            current_chunk.append(part)
+            current_size += part_size + separator_size
+    
+    # Adicionar último chunk
+    if current_chunk:
+        chunk_text = "\n<#6#>\n".join(current_chunk)
+        chunks.append(chunk_text)
+    
+    # IMPORTANTE: Adicionar <#6#> no início dos chunks 2, 3, etc.
+    # Isso garante que haverá uma pausa de 6s entre os chunks quando combinados
+    for i in range(1, len(chunks)):
+        chunks[i] = "<#6#>\n" + chunks[i]
+    
+    return chunks
 
 
 def generate_tts(text: str, voice_id: str = "Voicec41c71871760411371", 
@@ -185,6 +257,100 @@ def download_audio(url: str, output_path: str):
             f.write(chunk)
     
     print(f"✅ Áudio salvo em: {output_path}")
+
+
+def generate_and_combine_audio(text: str, voice_id: str, output_path: str, **tts_kwargs) -> dict:
+    """
+    Gera áudio TTS dividindo em chunks se necessário e combina os resultados.
+    
+    Args:
+        text: Texto processado
+        voice_id: ID da voz
+        output_path: Caminho para salvar o áudio final
+        **tts_kwargs: Argumentos adicionais para generate_tts (speed, volume, etc.)
+        
+    Returns:
+        dict: Informações sobre o áudio gerado
+    """
+    chunks = split_text_for_tts(text)
+    
+    if len(chunks) == 1:
+        # Texto não precisa ser dividido
+        print(f"📝 Texto cabe em um único áudio ({len(text)} caracteres)")
+        result = generate_tts(text, voice_id, **tts_kwargs)
+        audio_url = result.get("audio", {}).get("url")
+        if audio_url:
+            download_audio(audio_url, output_path)
+        return result
+    
+    # Precisa dividir em múltiplos áudios
+    print(f"⚠️  Texto muito longo ({len(text)} caracteres)")
+    print(f"📦 Dividindo em {len(chunks)} partes para processamento")
+    
+    temp_audio_paths = []
+    total_duration_ms = 0
+    
+    for i, chunk in enumerate(chunks, 1):
+        print(f"\n🔄 Processando parte {i}/{len(chunks)} ({len(chunk)} caracteres)...")
+        result = generate_tts(chunk, voice_id, **tts_kwargs)
+        
+        audio_data = result.get("audio", {})
+        audio_url = audio_data.get("url") if isinstance(audio_data, dict) else None
+        
+        if not audio_url:
+            raise RuntimeError(f"Erro ao gerar áudio da parte {i}")
+        
+        # Salvar áudio temporário
+        temp_path = f"{output_path}.part{i}.flac"
+        download_audio(audio_url, temp_path)
+        temp_audio_paths.append(temp_path)
+        
+        duration_ms = result.get("duration_ms", 0)
+        total_duration_ms += duration_ms
+    
+    # Combinar áudios usando moviepy
+    print(f"\n🔗 Combinando {len(temp_audio_paths)} áudios...")
+    try:
+        from moviepy.editor import AudioFileClip, concatenate_audioclips
+        
+        audio_clips = []
+        for temp_path in temp_audio_paths:
+            audio_clip = AudioFileClip(temp_path)
+            audio_clips.append(audio_clip)
+        
+        # Concatenar áudios (não precisa adicionar silêncio, já está no texto!)
+        combined = concatenate_audioclips(audio_clips)
+        
+        # Exportar áudio combinado
+        combined.write_audiofile(output_path, codec='flac', verbose=False, logger=None)
+        
+        # Fechar clipes
+        for clip in audio_clips:
+            clip.close()
+        combined.close()
+        
+        print(f"✅ Áudios combinados em: {output_path}")
+        
+        # Remover arquivos temporários
+        for temp_path in temp_audio_paths:
+            Path(temp_path).unlink(missing_ok=True)
+        
+        return {
+            "audio": {"url": f"file://{output_path}"},
+            "duration_ms": total_duration_ms,
+            "chunks": len(chunks)
+        }
+    
+    except Exception as e:
+        print(f"⚠️  Erro ao combinar áudios: {e}")
+        print(f"   Mantendo áudios separados.")
+        print(f"   Arquivos salvos como: {output_path}.part1.flac, {output_path}.part2.flac, etc.")
+        return {
+            "audio": {"url": f"file://{temp_audio_paths[0]}"},
+            "duration_ms": total_duration_ms,
+            "chunks": len(chunks),
+            "temp_files": temp_audio_paths
+        }
 
 
 def main():
@@ -267,7 +433,7 @@ def main():
         processed_text = process_script(raw_text)
         
         # Contar segmentos
-        num_segments = processed_text.count("<#6#>")
+        num_segments = processed_text.count("\n<#6#>\n") + 1  # +1 porque não tem marcador antes do primeiro
         print(f"✅ Texto processado: {num_segments} segmentos encontrados")
         
         # Mostrar preview
@@ -291,45 +457,39 @@ def main():
             print(f"💾 Texto processado salvo em: {output_txt}")
             return
         
-        # 3. Gerar TTS
-        result = generate_tts(
+        # Determinar caminho de saída
+        if args.output:
+            output_path = args.output
+        else:
+            output_path = Path(args.docx_path).stem + "_audio.flac"
+        
+        # 3. Gerar TTS (com divisão automática se necessário)
+        tts_kwargs = {
+            'speed': args.speed,
+            'volume': args.volume,
+            'pitch': args.pitch,
+            'sample_rate': args.sample_rate,
+            'bitrate': args.bitrate
+        }
+        
+        result = generate_and_combine_audio(
             text=processed_text,
             voice_id=args.voice_id,
-            speed=args.speed,
-            volume=args.volume,
-            pitch=args.pitch,
-            sample_rate=args.sample_rate,
-            bitrate=args.bitrate
+            output_path=output_path,
+            **tts_kwargs
         )
         
-        # 4. Extrair URL do áudio
-        audio_data = result.get("audio", {})
-        audio_url = audio_data.get("url") if isinstance(audio_data, dict) else None
+        # 4. Mostrar resultado
         duration_ms = result.get("duration_ms", 0)
-        
-        if not audio_url:
-            print("❌ Erro: URL do áudio não encontrada na resposta")
-            print(f"Resposta completa: {result}")
-            sys.exit(1)
-        
-        # Detectar extensão do arquivo a partir da URL
-        from urllib.parse import urlparse
-        url_path = urlparse(audio_url).path
-        audio_extension = Path(url_path).suffix or ".mp3"  # fallback para .mp3
+        num_chunks = result.get("chunks", 1)
         
         print("\n" + "="*60)
         print("✨ ÁUDIO GERADO COM SUCESSO! ✨")
         print("="*60)
-        print(f"\n🎵 URL do áudio: {audio_url}")
+        if num_chunks > 1:
+            print(f"📦 Texto dividido em {num_chunks} partes e combinado")
         print(f"⏱️  Duração: {duration_ms / 1000:.1f} segundos ({duration_ms / 60000:.1f} minutos)")
-        
-        # 5. Baixar áudio se output foi especificado
-        if args.output:
-            download_audio(audio_url, args.output)
-        else:
-            # Gerar nome automaticamente com a extensão correta
-            output_path = Path(args.docx_path).stem + f"_audio{audio_extension}"
-            download_audio(audio_url, output_path)
+        print(f"📁 Áudio salvo em: {output_path}")
         
         print("\n💡 Próximos passos:")
         print("   1. Use seu script de corte de áudio para detectar os silêncios de 6s")

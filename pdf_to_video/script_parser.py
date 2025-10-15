@@ -14,9 +14,35 @@ TOKEN_PATTERN = re.compile(r"\[(slide_(\d+)|short_pause|long_pause|vignette)\]")
 
 
 def _iter_tokens_from_text(text: str, short_pause_seconds: float, long_pause_seconds: float) -> Iterable[ScriptToken]:
-    """Gera tokens na ordem em que aparecem no texto plano do script."""
-
-    for match in TOKEN_PATTERN.finditer(text):
+    """Gera tokens na ordem em que aparecem no texto plano do script.
+    
+    Remove tags de pause e vignette que aparecem dentro de parágrafos e mantém apenas
+    as ocorrências que estão no início de linhas ou após um token de slide.
+    """
+    # Primeiro, dividir o texto em linhas para processar corretamente
+    lines = text.split('\n')
+    processed_text = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Se a linha contém apenas tokens (slide, pause ou vignette), mantém como está
+        if re.fullmatch(r'(\[(slide_\d+|short_pause|long_pause|vignette)\]\s*)+', line):
+            processed_text.append(line)
+        else:
+            # Remove tokens de pause e vignette que aparecem no meio do texto
+            # mas mantém tokens de slide
+            cleaned_line = re.sub(r'\s*\[(short_pause|long_pause|vignette)\]\s*', ' ', line)
+            cleaned_line = cleaned_line.strip()
+            if cleaned_line:
+                processed_text.append(cleaned_line)
+    
+    # Agora processar os tokens do texto limpo
+    cleaned_text = '\n'.join(processed_text)
+    
+    for match in TOKEN_PATTERN.finditer(cleaned_text):
         raw = match.group(1)
         if raw.startswith("slide_"):
             index_text = match.group(2)
@@ -51,7 +77,7 @@ def extract_slide_texts(docx_path: Path) -> Dict[int, str]:
     """Extrai textos por slide com base nos marcadores [slide_XX] no script.
 
     Retorna um dicionário {index: texto}. Linhas entre um [slide_XX] e o próximo marcador
-    são agregadas como texto do slide.
+    são agregadas como texto do slide. Remove tags de pause e vignette do texto.
     """
 
     texts: Dict[int, List[str]] = {}
@@ -67,9 +93,18 @@ def extract_slide_texts(docx_path: Path) -> Dict[int, str]:
         if m:
             current_idx = int(m.group(1))
             texts.setdefault(current_idx, [])
+            # Remove a tag de slide da linha e adiciona o restante se houver
+            remaining = re.sub(r'\[slide_\d+\]', '', line).strip()
+            # Remove tags de pause e vignette
+            remaining = re.sub(r'\s*\[(short_pause|long_pause|vignette)\]\s*', ' ', remaining).strip()
+            if remaining:
+                texts[current_idx].append(remaining)
             continue
         if current_idx != -1:
-            texts.setdefault(current_idx, []).append(line)
-    return {k: "\n".join(v).strip() for k, v in texts.items()}
+            # Remove tags de pause e vignette do texto
+            cleaned_line = re.sub(r'\s*\[(short_pause|long_pause|vignette)\]\s*', ' ', line).strip()
+            if cleaned_line:
+                texts.setdefault(current_idx, []).append(cleaned_line)
+    return {k: " ".join(v).strip() for k, v in texts.items()}
 
 

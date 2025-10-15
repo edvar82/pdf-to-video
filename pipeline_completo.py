@@ -108,7 +108,14 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+
+    fal_key = os.getenv("FAL_KEY")
+    if fal_key:
+        os.environ["FAL_KEY"] = fal_key
+    else:
+        print("⚠️ Aviso: Variável de ambiente FAL_KEY não definida. Algumas etapas podem falhar.")
+
     # Validar diretório da aula
     aula_dir = Path(args.aula_dir)
     if not aula_dir.exists():
