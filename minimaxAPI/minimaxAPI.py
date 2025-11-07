@@ -214,7 +214,7 @@ def generate_tts(text: str, voice_id: str = "Voicec41c71871760411371",
                 print(f"   {log['message']}")
     
     result = fal_client.subscribe(
-        "fal-ai/minimax/preview/speech-2.5-hd",
+        "fal-ai/minimax/speech-2.6-hd",
         arguments={
             "text": text,
             "voice_setting": {
@@ -363,7 +363,7 @@ def main():
     )
     parser.add_argument(
         "--voice-id",
-        default="Voicec41c71871760411371",
+        default="Voice64b867361762547089",
         help="ID da voz para TTS (use o ID obtido do clone_voice.py ou uma voz padrão)"
     )
     parser.add_argument(
