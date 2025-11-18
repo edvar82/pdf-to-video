@@ -55,6 +55,10 @@ def run_command(cmd: list[str], description: str, cwd: Optional[Path] = None):
     print(f"\n{'='*60}")
     print(f"🔄 {description}")
     print(f"{'='*60}")
+    
+    if cmd[0] == "python":
+        cmd[0] = sys.executable
+    
     print(f"$ {' '.join(cmd)}\n")
     
     result = subprocess.run(cmd, cwd=cwd, capture_output=False, text=True)
